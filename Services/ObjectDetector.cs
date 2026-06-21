@@ -1,4 +1,4 @@
-﻿using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Drawing.Processing;
@@ -10,8 +10,171 @@ namespace SpatialVisionService.Services
     public class ObjectDetector
     {
         private const int TargetSize = 640;
-        private const float ConfidenceThreshold = 0.60f;
+        private const float ConfidenceThreshold = 0.40f;
+        public List<DetectionResult> Detect(string modelPath, string inputPath, out int originalWidth, out int originalHeight)
+        {
+            var detections = new List<DetectionResult>();
+            using var img = Image.Load<Rgb24>(inputPath);
+            originalWidth = img.Width;
+            originalHeight = img.Height;
 
+            // 1. Debug: Save what the model sees
+            using var debugImg = img.Clone(x => x.Resize(TargetSize, TargetSize));
+            debugImg.Save("debug_input.jpg");
+
+            using var session = new InferenceSession(modelPath);
+            img.Mutate(x => x.Resize(TargetSize, TargetSize));
+
+            var yoloTensor = new DenseTensor<float>(new[] { 1, 3, TargetSize, TargetSize });
+            for (int y = 0; y < TargetSize; y++)
+            {
+                for (int x = 0; x < TargetSize; x++)
+                {
+                    var pixel = img[x, y];
+                    yoloTensor[0, 0, y, x] = pixel.R / 255f;
+                    yoloTensor[0, 1, y, x] = pixel.G / 255f;
+                    yoloTensor[0, 2, y, x] = pixel.B / 255f;
+                }
+            }
+
+            var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(session.InputMetadata.Keys.First(), yoloTensor) };
+            using var results = session.Run(inputs);
+            var output = results.First().AsTensor<float>();
+
+            // 2. Coordinate Scaling Logic
+            float scaleX = (float)originalWidth / TargetSize;
+            float scaleY = (float)originalHeight / TargetSize;
+
+            for (int i = 0; i < output.Dimensions[1]; i++)
+            {
+                float conf = output[0, i, 4];
+                if (conf < ConfidenceThreshold) continue;
+
+                // YOLO outputs [x1, y1, x2, y2, confidence, class_id]
+                // Map 640x640 coordinates back to original image size
+                float x1 = output[0, i, 0] * scaleX;
+                float y1 = output[0, i, 1] * scaleY;
+                float x2 = output[0, i, 2] * scaleX;
+                float y2 = output[0, i, 3] * scaleY;
+
+                detections.Add(new DetectionResult
+                {
+                    X = x1,
+                    Y = y1,
+                    Width = x2 - x1,
+                    Height = y2 - y1,
+                    Confidence = conf,
+                    Label = "Pothole"
+                });
+            }
+            return detections;
+        }
+
+
+        //public List<DetectionResult> Detect(string modelPath, string inputPath)
+        //{
+        //    var detections = new List<DetectionResult>();
+        //    using var session = new InferenceSession(modelPath);
+        //    using var img = Image.Load<Rgb24>(inputPath);
+
+        //    // Resize to 640x640 for YOLO
+        //    img.Mutate(x => x.Resize(TargetSize, TargetSize));
+
+        //    var yoloTensor = new DenseTensor<float>(new[] { 1, 3, TargetSize, TargetSize });
+
+        //    // Ensure normalization matches common YOLO standards (0-1)
+        //    for (int y = 0; y < TargetSize; y++)
+        //    {
+        //        for (int x = 0; x < TargetSize; x++)
+        //        {
+        //            var pixel = img[x, y];
+        //            yoloTensor[0, 0, y, x] = pixel.R / 255f;
+        //            yoloTensor[0, 1, y, x] = pixel.G / 255f;
+        //            yoloTensor[0, 2, y, x] = pixel.B / 255f;
+        //        }
+        //    }
+
+        //    var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(session.InputMetadata.Keys.First(), yoloTensor) };
+        //    using var results = session.Run(inputs);
+        //    var output = results.First().AsTensor<float>();
+
+        //    // DIAGNOSTIC BLOCK: Print first 3 results to verify parsing
+        //    Console.WriteLine("[Detector Debug] First 3 Raw Detections:");
+        //    for (int i = 0; i < 3; i++)
+        //    {
+        //        Console.WriteLine($"Box {i}: x={output[0, i, 0]:F2}, y={output[0, i, 1]:F2}, w={output[0, i, 2]:F2}, h={output[0, i, 3]:F2}, conf={output[0, i, 4]:F4}");
+        //    }
+
+        //    //For Pothole Detection: Filter by confidence and class ID (assuming class ID 0 is "pothole")
+        //    for (int i = 0; i < output.Dimensions[1]; i++)
+        //    {
+        //        // YOLO output: [x, y, w, h, confidence, class_id]
+        //        float confidence = output[0, i, 4];
+        //        int classId = (int)output[0, i, 5];
+
+        //        // Assuming your pothole model uses index 0 for "pothole"
+        //        if (confidence < ConfidenceThreshold || classId != 0) continue;
+
+        //        detections.Add(new DetectionResult
+        //        {
+        //            X = output[0, i, 0],
+        //            Y = output[0, i, 1],
+        //            Width = output[0, i, 2],
+        //            Height = output[0, i, 3],
+        //            Confidence = confidence
+        //        });
+        //    }
+
+        //    //for (int i = 0; i < output.Dimensions[1]; i++)
+        //    //{
+        //    //    // Check if confidence at index 4 is valid
+        //    //    if (output[0, i, 4] < ConfidenceThreshold) continue;
+
+        //    //    detections.Add(new DetectionResult
+        //    //    {
+        //    //        X = output[0, i, 0],
+        //    //        Y = output[0, i, 1],
+        //    //        Width = output[0, i, 2],
+        //    //        Height = output[0, i, 3],
+        //    //        Confidence = output[0, i, 4]
+        //    //    });
+        //    //}
+
+        //    return detections;
+        //} 
+
+
+
+        //public List<DetectionResult> Detect(string modelPath, string inputPath)
+        //{
+        //    var detections = new List<DetectionResult>();
+        //    using var session = new InferenceSession(modelPath);
+        //    using var img = Image.Load<Rgb24>(inputPath);
+
+        //    // ... (preprocessing omitted for brevity, same as previous logic)
+        //    // Assume tensor created...
+        //    var yoloTensor = new DenseTensor<float>(new[] { 1, 3, TargetSize, TargetSize });
+        //    // ... (tensor filling logic)
+
+        //    var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(session.InputMetadata.Keys.First(), yoloTensor) };
+        //    using var results = session.Run(inputs);
+        //    var output = results.First().AsTensor<float>();
+
+        //    for (int i = 0; i < output.Dimensions[1]; i++)
+        //    {
+        //        if (output[0, i, 4] < ConfidenceThreshold) continue;
+
+        //        detections.Add(new DetectionResult
+        //        {
+        //            X = output[0, i, 0],
+        //            Y = output[0, i, 1],
+        //            Width = output[0, i, 2],
+        //            Height = output[0, i, 3],
+        //            Confidence = output[0, i, 4]
+        //        });
+        //    }
+        //    return detections;
+        //}
         public void Process(string modelPath, string inputPath, string outputPath)
         {
             Console.WriteLine("\n--- Phase 2: Object Detection ---");

@@ -11,7 +11,29 @@ namespace SpatialVisionService.Services
         private const int TargetSize = 384;
         private readonly float[] _mean = [0.485f, 0.456f, 0.406f];
         private readonly float[] _std = [0.229f, 0.224f, 0.225f];
+        public float[] GetDepthMap(string modelPath, string inputPath)
+        {
+            using var session = new InferenceSession(modelPath);
+            using var image = Image.Load<Rgb24>(inputPath);
+            image.Mutate(x => x.Resize(TargetSize, TargetSize));
 
+            var inputTensor = new DenseTensor<float>(new[] { 1, 3, TargetSize, TargetSize });
+            // ... (standard preprocessing)
+            for (int y = 0; y < TargetSize; y++)
+            {
+                for (int x = 0; x < TargetSize; x++)
+                {
+                    var pixel = image[x, y];
+                    inputTensor[0, 0, y, x] = (pixel.R / 255f - 0.485f) / 0.229f;
+                    inputTensor[0, 1, y, x] = (pixel.G / 255f - 0.456f) / 0.224f;
+                    inputTensor[0, 2, y, x] = (pixel.B / 255f - 0.406f) / 0.225f;
+                }
+            }
+
+            var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(session.InputMetadata.Keys.First(), inputTensor) };
+            using var results = session.Run(inputs);
+            return results.First().AsTensor<float>().ToArray();
+        }
         public void Process(string modelPath, string inputPath, string outputPath)
         {
             Console.WriteLine("--- Phase 1: Depth Mapping ---");
