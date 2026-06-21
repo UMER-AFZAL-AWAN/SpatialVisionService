@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="SpatialVisionService.csproj" />
+  <Project Path="SpatialVisionService.API\SpatialVisionService.API.csproj" />
 </Solution>
