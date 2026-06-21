@@ -51,12 +51,8 @@ public class YoloDetector : IObjectDetector
         using var results = _session.Run(inputs);
         var output = results.First().AsTensor<float>();
 
-        // The actual tensor shape for YOLOv8/v10 is usually [1, 6, 300] or similar, 
-        // where Dimensions[1] is the attributes (x, y, x2, y2, conf, class_id)
-        // and Dimensions[2] is the number of detections.
-        // Even if the user prompt stated [1, 300, 6], the observed output (2 results, garbled coordinates/classes)
-        // proves it is iterating across the 6 attributes instead of the 300 detections.
-        int numDetections = output.Dimensions[2];
+        // Expected tensor shape: [1, 300, 6]
+        int numDetections = output.Dimensions[1];
 
         // Rule B: Scale factor from 640x640 model space → original image dimensions
         float scaleX = (float)originalWidth / TargetSize;
@@ -64,19 +60,19 @@ public class YoloDetector : IObjectDetector
 
         for (int i = 0; i < numDetections; i++)
         {
-            // Confidence at index 4 (attribute dimension) is on 0.0-1.0 scale
-            float rawConf = output[0, 4, i];
-            if (rawConf < ConfidenceThreshold) continue;
+            // Rule A: Confidence at index 4 is on a 0-100 scale natively in this model
+            float rawConf = output[0, i, 4];
+            if (rawConf < 40.0f) continue;
 
-            // Class ID at index 5, cast to int and map to label
-            int classId = (int)output[0, 5, i];
-            string label = ClassLabels.GetValueOrDefault(classId, $"Class_{classId}");
+            // Class ID at index 5
+            int classId = (int)output[0, i, 5];
+            string label = ClassLabels.GetValueOrDefault(classId, $"Pothole_{classId}");
 
-            // The model outputs [x1, y1, x2, y2]
-            float x1 = output[0, 0, i] * scaleX;
-            float y1 = output[0, 1, i] * scaleY;
-            float x2 = output[0, 2, i] * scaleX;
-            float y2 = output[0, 3, i] * scaleY;
+            // The model natively outputs [x1, y1, x2, y2]
+            float x1 = output[0, i, 0] * scaleX;
+            float y1 = output[0, i, 1] * scaleY;
+            float x2 = output[0, i, 2] * scaleX;
+            float y2 = output[0, i, 3] * scaleY;
 
             detections.Add(new DetectionResult
             {
@@ -84,7 +80,7 @@ public class YoloDetector : IObjectDetector
                 Y = y1,
                 Width = x2 - x1,  // Actual width
                 Height = y2 - y1, // Actual height
-                Confidence = rawConf,
+                Confidence = rawConf / 100f, // Normalize to 0.0-1.0
                 ClassId = classId,
                 Label = label
             });
