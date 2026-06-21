@@ -78,16 +78,17 @@ namespace SpatialVisionService.Services
                 float confidence = output[0, i, 4];
                 if (confidence < ConfidenceThreshold) continue;
 
-                float cx = output[0, i, 0];
-                float cy = output[0, i, 1];
-                float w = output[0, i, 2];
-                float h = output[0, i, 3];
+                // YOLO26 natively outputs [x1, y1, x2, y2, confidence, class_id]
+                float x1 = output[0, i, 0];
+                float y1 = output[0, i, 1];
+                float x2 = output[0, i, 2];
+                float y2 = output[0, i, 3];
 
                 // Re-scale coordinate plane bounds back to native resolution targets
-                float xMin = (cx - (w / 2f)) * scaleX;
-                float yMin = (cy - (h / 2f)) * scaleY;
-                float boxWidth = w * scaleX;
-                float boxHeight = h * scaleY;
+                float xMin = x1 * scaleX;
+                float yMin = y1 * scaleY;
+                float boxWidth = (x2 - x1) * scaleX;
+                float boxHeight = (y2 - y1) * scaleY;
 
                 var rect = new RectangleF(xMin, yMin, boxWidth, boxHeight);
                 targetImage.Mutate(ctx => ctx.Draw(Color.LimeGreen, 3f, rect));

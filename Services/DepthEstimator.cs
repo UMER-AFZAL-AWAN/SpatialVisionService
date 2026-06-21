@@ -51,33 +51,80 @@ namespace SpatialVisionService.Services
             }
             return tensor;
         }
-
         private void PostProcessAndSave(Tensor<float> depthTensor, string outputPath)
         {
-            float minDepth = float.MaxValue;
-            float maxDepth = float.MinValue;
+            float[] data = depthTensor.ToArray();
 
-            foreach (float val in depthTensor)
+            // 1. Sort the data to find the percentiles
+            float[] sortedData = (float[])data.Clone();
+            Array.Sort(sortedData);
+
+            // 2. Pick the 2nd percentile and 98th percentile as our bounds
+            int lowerIndex = (int)(sortedData.Length * 0.02);
+            int upperIndex = (int)(sortedData.Length * 0.98);
+
+            float minClip = sortedData[lowerIndex];
+            float maxClip = sortedData[upperIndex];
+            float range = maxClip - minClip;
+
+            int height = (int)depthTensor.Dimensions[depthTensor.Dimensions.Length - 2];
+            int width = (int)depthTensor.Dimensions[depthTensor.Dimensions.Length - 1];
+
+            using var outputImage = new Image<L8>(width, height);
+
+            for (int y = 0; y < height; y++)
             {
-                if (val < minDepth) minDepth = val;
-                if (val > maxDepth) maxDepth = val;
-            }
-
-            using var outputImage = new Image<L8>(TargetSize, TargetSize);
-            float depthRange = maxDepth - minDepth;
-
-            for (int y = 0; y < TargetSize; y++)
-            {
-                for (int x = 0; x < TargetSize; x++)
+                for (int x = 0; x < width; x++)
                 {
-                    float rawDepth = depthTensor[0, y, x];
-                    byte grayValue = (byte)(((rawDepth - minDepth) / depthRange) * 255);
-                    outputImage[x, y] = new L8(grayValue);
+                    float val = data[(y * width) + x];
+
+                    // Clamp values to our clip range
+                    float clamped = Math.Max(minClip, Math.Min(maxClip, val));
+
+                    // Normalize based on the clipped range
+                    float normalized = range > 0 ? (clamped - minClip) / range : 0f;
+
+                    byte gray = (byte)(normalized * 255);
+                    outputImage[x, y] = new L8(gray);
                 }
             }
 
             outputImage.SaveAsPng(outputPath);
-            Console.WriteLine($"Depth map saved to: {outputPath}");
+            Console.WriteLine($"Depth map saved with contrast stretch. Range used: {minClip:F2} to {maxClip:F2}");
         }
+        //private void PostProcessAndSave(Tensor<float> depthTensor, string outputPath)
+        //{
+        //    // 1. Get raw data
+        //    float[] data = depthTensor.ToArray();
+
+        //    // 2. Find absolute Min/Max to fit the scale correctly
+        //    float min = data.Min();
+        //    float max = data.Max();
+        //    float range = max - min;
+
+        //    // Get dimensions from tensor (e.g., 384)
+        //    int height = (int)depthTensor.Dimensions[depthTensor.Dimensions.Length - 2];
+        //    int width = (int)depthTensor.Dimensions[depthTensor.Dimensions.Length - 1];
+
+        //    using var outputImage = new Image<L8>(width, height);
+
+        //    for (int y = 0; y < height; y++)
+        //    {
+        //        for (int x = 0; x < width; x++)
+        //        {
+        //            // Simple mapping: (value - min) / range
+        //            float val = data[(y * width) + x];
+        //            float normalized = range > 0 ? (val - min) / range : 0f;
+
+        //            // Map 0.0-1.0 to 0-255
+        //            byte gray = (byte)(normalized * 255);
+
+        //            outputImage[x, y] = new L8(gray);
+        //        }
+        //    }
+
+        //    outputImage.SaveAsPng(outputPath);
+        //    Console.WriteLine($"Depth map saved to: {outputPath} (Range: {min:F2} to {max:F2})");
+        //}
     }
 }
