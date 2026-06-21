@@ -1,8 +1,12 @@
+using SixLabors.Fonts;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using SpatialVisionService.API.Models;
 using SpatialVisionService.API.Services.Interfaces;
 using System.Diagnostics;
+using System.IO;
 
 namespace SpatialVisionService.API.Services.Orchestrator;
 
@@ -49,6 +53,10 @@ public class SpatialOrchestrator : ISpatialOrchestrator
 
         _logger.LogInformation("Detected {Count} object(s). Performing spatial fusion...", detections.Count);
 
+        Font font = SystemFonts.TryGet("Arial", out FontFamily family) 
+            ? new Font(family, 16) 
+            : SystemFonts.Families.First().CreateFont(16);
+
         // --- Pipeline Stage 3: Spatial Fusion (Rule C) ---
         foreach (var detection in detections)
         {
@@ -66,10 +74,22 @@ public class SpatialOrchestrator : ISpatialOrchestrator
             // 3. Extract Z-Depth from the flat depth map array
             detection.DepthValue = depthMap[gridY * DepthGridSize + gridX];
 
+            // 4. Draw overlay onto the image
+            var rect = new RectangleF(detection.X, detection.Y, detection.Width, detection.Height);
+            image.Mutate(ctx => ctx.Draw(Color.LimeGreen, 2f, rect));
+            
+            string label = $"{detection.Label} | D:{detection.DepthValue:F2}";
+            image.Mutate(ctx => ctx.DrawText(label, font, Color.White, new PointF(detection.X, Math.Max(0, detection.Y - 20))));
+
             _logger.LogDebug(
                 "  → '{Label}' center=({CX:F0},{CY:F0}) → grid=({GX},{GY}) → depth={Depth:F4}",
                 detection.Label, centerX, centerY, gridX, gridY, detection.DepthValue);
         }
+
+        // --- Pipeline Stage 4: Encode Image ---
+        using var ms = new MemoryStream();
+        await image.SaveAsJpegAsync(ms);
+        string base64Image = Convert.ToBase64String(ms.ToArray());
 
         sw.Stop();
         _logger.LogInformation("Pipeline complete in {Elapsed:F1}ms", sw.Elapsed.TotalMilliseconds);
@@ -79,7 +99,8 @@ public class SpatialOrchestrator : ISpatialOrchestrator
             Detections = detections,
             ImageWidth = originalWidth,
             ImageHeight = originalHeight,
-            ProcessingTimeMs = sw.Elapsed.TotalMilliseconds
+            ProcessingTimeMs = sw.Elapsed.TotalMilliseconds,
+            AnnotatedImageBase64 = base64Image
         };
     }
 }

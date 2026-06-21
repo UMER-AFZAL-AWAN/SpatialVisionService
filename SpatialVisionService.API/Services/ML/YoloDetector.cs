@@ -16,9 +16,8 @@ public class YoloDetector : IObjectDetector
 {
     private const int TargetSize = 640;
 
-    // Rule A: Raw confidence is on a 0–100 scale.
-    // Detections below this threshold are discarded before normalization.
-    private const float ConfidenceThreshold = 40.0f;
+    // Standard YOLO confidence is on a 0.0-1.0 scale
+    private const float ConfidenceThreshold = 0.40f;
 
     private readonly InferenceSession _session;
 
@@ -65,11 +64,11 @@ public class YoloDetector : IObjectDetector
 
         for (int i = 0; i < numDetections; i++)
         {
-            // Rule A: Confidence at index 4 (attribute dimension) is on 0–100 scale
+            // Confidence at index 4 (attribute dimension) is on 0.0-1.0 scale
             float rawConf = output[0, 4, i];
             if (rawConf < ConfidenceThreshold) continue;
 
-            // Rule A: Class ID at index 5, cast to int and map to label
+            // Class ID at index 5, cast to int and map to label
             int classId = (int)output[0, 5, i];
             string label = ClassLabels.GetValueOrDefault(classId, $"Class_{classId}");
 
@@ -85,7 +84,7 @@ public class YoloDetector : IObjectDetector
                 Y = y1,
                 Width = x2 - x1,  // Actual width
                 Height = y2 - y1, // Actual height
-                Confidence = rawConf / 100f,
+                Confidence = rawConf,
                 ClassId = classId,
                 Label = label
             });

@@ -16,4 +16,7 @@ public class VisionResponse
 
     /// <summary>Total pipeline processing time in milliseconds.</summary>
     public double ProcessingTimeMs { get; set; }
+
+    /// <summary>Base64 encoded JPEG string of the annotated image with bounding boxes.</summary>
+    public string AnnotatedImageBase64 { get; set; }
 }
